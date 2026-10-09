@@ -1,0 +1,78 @@
+# Reference: <https://postmarketos.org/vendorkernel>
+# X700 mainline kernel and device support from kubierend/sm-x700-linux.
+maintainer="ben443"
+_flavor="postmarketos-qcom-sm8450-gts8wifi"
+pkgname=linux-postmarketos-qcom-sm8450-gts8wifi
+pkgver=6.13_rc3
+pkgrel=0
+pkgdesc="Mainline kernel for Samsung Galaxy Tab S8 Wi-Fi (SM-X700)"
+arch="aarch64"
+_carch="arm64"
+url="https://github.com/kubierend/sm-x700-linux"
+license="GPL-2.0-only"
+options="!strip !check !tracedeps
+	pmb:cross-native
+"
+makedepends="
+	bison
+	devicepkg-dev
+	findutils
+	flex
+	installkernel
+	linux-headers
+	openssl-dev
+	perl
+	python3
+"
+
+_commit="bf1d29fced6e156dd6090a9b6600a8c44259c114"
+source="
+	linux-$_commit.tar.gz::https://github.com/sm8450-mainline/linux/archive/$_commit.tar.gz
+	x700.config
+	sm8450-samsung-gts8wifi.dts
+	$(cd "$startdir" && ls 0*.patch | tr '\n' ' ')
+"
+builddir="$srcdir/linux-$_commit"
+
+prepare() {
+	default_prepare
+
+	cp "$srcdir"/sm8450-samsung-gts8wifi.dts \
+		arch/arm64/boot/dts/qcom/sm8450-samsung-gts8wifi.dts
+	if ! grep -q "sm8450-samsung-gts8wifi.dtb" \
+			arch/arm64/boot/dts/qcom/Makefile; then
+		echo 'dtb-$(CONFIG_ARCH_QCOM) += sm8450-samsung-gts8wifi.dtb' \
+			>> arch/arm64/boot/dts/qcom/Makefile
+	fi
+
+	make ARCH="$_carch" defconfig sm8450.config
+	KCONFIG_CONFIG=.config ./scripts/kconfig/merge_config.sh -m \
+		.config "$srcdir"/x700.config
+	make ARCH="$_carch" olddefconfig
+}
+
+build() {
+	unset LDFLAGS
+	make ARCH="$_carch" CC="${CC:-gcc}" \
+		KBUILD_BUILD_VERSION="$((pkgrel + 1))-$_flavor" \
+		Image.gz modules dtbs
+}
+
+package() {
+	mkdir -p "$pkgdir"/boot
+	install -Dm644 "$builddir/arch/$_carch/boot/Image.gz" \
+		"$pkgdir/boot/vmlinuz"
+
+	make modules_install dtbs_install \
+		ARCH="$_carch" \
+		INSTALL_PATH="$pkgdir"/boot/ \
+		INSTALL_MOD_PATH="$pkgdir" \
+		INSTALL_MOD_STRIP=1 \
+		INSTALL_DTBS_PATH="$pkgdir/boot/dtbs"
+	rm -f "$pkgdir"/lib/modules/*/build "$pkgdir"/lib/modules/*/source
+
+	install -D "$builddir"/include/config/kernel.release \
+		"$pkgdir"/usr/share/kernel/$_flavor/kernel.release
+}
+
+sha512sums="SKIP"

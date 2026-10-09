@@ -1,0 +1,13 @@
+# Samsung Galaxy Tab S8 (Wi-Fi), SM-X700.
+# ABL loads the boot image at the legacy address, then uniLoader's position-
+# independent entry copies itself to TEXT_BASE. The stock Android FDT reserves
+# 0x87000000, and 0xb0000000 overlaps hypervisor guest RAM, so neither is usable.
+CONFIG_POSITION_INDEPENDENT=y
+CONFIG_LINUX_KRNL_HEADER_IMG=y
+CONFIG_SM8450=y
+CONFIG_SAMSUNG_GTS8WIFI=y
+# 0xb2400000..0xb3d5c080 is usable RAM with no active reservation in the stock
+# Android runtime FDT (checked by boot/audit-boot-layout.py).
+CONFIG_TEXT_BASE=0xb2400000
+CONFIG_PAYLOAD_ENTRY=0x80ba00000
+CONFIG_RAMDISK_ENTRY=0xb6915000

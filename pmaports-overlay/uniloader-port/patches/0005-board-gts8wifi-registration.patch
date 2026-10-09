@@ -1,0 +1,38 @@
+board: register Samsung Galaxy Tab S8 Wi-Fi (gts8wifi)
+
+Add a selectable uniLoader board profile for the SM-X700.
+
+The board implementation and defconfig are staged from this repository.
+
+---
+
+diff --git a/board/Kconfig b/board/Kconfig
+index fb67b3c..2abb427 100644
+--- a/board/Kconfig
++++ b/board/Kconfig
+@@ -201,6 +201,13 @@ menu "Device Support"
+ 		help
+ 		  Say Y if you want to include support for Samsung Galaxy Tab S8+ Wi-Fi
+ 
++	config SAMSUNG_GTS8WIFI
++		bool "Support for Samsung Galaxy Tab S8 Wi-Fi"
++		default n
++		depends on SM8450
++		help
++		  Say Y if you want to include support for Samsung Galaxy Tab S8 Wi-Fi
++
+ 	config SAMSUNG_HEROLTE
+ 		bool "Support for Samsung Galaxy S7"
+ 		default n
+diff --git a/board/Makefile b/board/Makefile
+index 4642f18..4dc211e 100644
+--- a/board/Makefile
++++ b/board/Makefile
+@@ -25,6 +25,7 @@ lib-$(CONFIG_SAMSUNG_DREAMLTE) += samsung/board-dreamlte.o
+ lib-$(CONFIG_SAMSUNG_G0S) += samsung/board-g0s.o
+ lib-$(CONFIG_SAMSUNG_GTA4XL) += samsung/board-gta4xl.o
+ lib-$(CONFIG_SAMSUNG_GTS8PWIFI) += samsung/board-gts8pwifi.o
++lib-$(CONFIG_SAMSUNG_GTS8WIFI) += samsung/board-gts8wifi.o
+ lib-$(CONFIG_SAMSUNG_HEROLTE) += samsung/board-herolte.o
+ lib-$(CONFIG_SAMSUNG_J4LTE) += samsung/board-j4lte.o
+ lib-$(CONFIG_SAMSUNG_J5LTE) += samsung/board-j5lte.o

@@ -31,33 +31,79 @@ OVERLAY     := pmaports-overlay/device/testing
 # Non-device packages forked from Alpine live in temp/, as in pmaports.
 TEMP_OVERLAY := pmaports-overlay/temp
 TEMP_PKGS   := $(notdir $(wildcard $(TEMP_OVERLAY)/*))
+UL_PORT     := pmaports-overlay/uniloader-port
+VARIANT     ?= gts8pwifi
+ifeq ($(VARIANT),gts8pwifi)
 KPKG        := linux-postmarketos-qcom-sm8450
 DPKG        := device-samsung-gts8pwifi
 DEVICE      := samsung-gts8pwifi
+BOARD       := gts8pwifi
+DTB         := sm8450-samsung-gts8pwifi
+COMPAT      := samsung,gts8pwifi
+CMDLINE_IN  = $(UL_PORT)/cmdline.in
+OS_PATCH    := 2025-04
+else ifeq ($(VARIANT),gts8wifi)
+KPKG        := linux-postmarketos-qcom-sm8450-gts8wifi
+DPKG        := device-samsung-gts8wifi
+DEVICE      := samsung-gts8wifi
+BOARD       := gts8wifi
+DTB         := sm8450-samsung-gts8wifi
+COMPAT      := samsung,gts8wifi
+CMDLINE_IN  = $(UL_PORT)/cmdline-gts8wifi.in
+OS_PATCH    := 2025-09
+else
+$(error Unsupported VARIANT '$(VARIANT)' (choose gts8pwifi or gts8wifi))
+endif
 ROOTFS_BOOT := pmb-work/chroot_rootfs_$(DEVICE)/boot
+INITRAMFS   ?= $(ROOTFS_BOOT)/initramfs
 PKGS        := pmb-work/packages/edge/aarch64
 UL_SRC      := reference/uniLoader
 UL_CHROOT   := pmb-work/chroot_native/home/pmos/uniLoader
-UL_PORT     := pmaports-overlay/uniloader-port
+ifeq ($(VARIANT),gts8pwifi)
 BUILD       := root-build/uniloader
-# The combined rootfs image (pmOS_boot + pmOS_root in one GPT) lives at the
-# top of root-build/, NOT under $(BUILD), see docs/05 section 8b.
 COMBINED    := root-build/combined.img
 STAGE       := .stage
+ARTIFACT_DIR := root-build
+RESTORE_DIR := root-build
+else
+BUILD       := root-build/$(VARIANT)/uniloader
+COMBINED    := root-build/$(VARIANT)/combined.img
+STAGE       := .stage/$(VARIANT)
+ARTIFACT_DIR := root-build/$(VARIANT)
+RESTORE_DIR := root-build/$(VARIANT)
+endif
+BOOT_TAR    = $(ARTIFACT_DIR)/pmos_uniloader_boot$(FLAVOR).tar
+USERDATA_TAR = $(ARTIFACT_DIR)/pmos_userdata_sparse.tar
+AP_TAR      := $(ARTIFACT_DIR)/pmos_uniloader_ap.tar
+# The combined rootfs image (pmOS_boot + pmOS_root in one GPT) lives at the
+# top of root-build/, NOT under $(BUILD), see docs/05 section 8b.
+UL_BOARD    := $(UL_PORT)/board/samsung/board-$(BOARD).c
+UL_DEFCONFIG := $(UL_PORT)/configs/$(BOARD)_defconfig
+UL_CONFIG   := $(BOARD)_defconfig
 CROSS       := aarch64-alpine-linux-musl-
 # Stock boot.img values: Samsung enforces anti-rollback (download screen: AR:2)
 OS_VERSION  := 12.0.0
-OS_PATCH    := 2025-04
+ifeq ($(VARIANT),gts8pwifi)
+DEVSUDO_ARGS = $(if $(DEVSUDO),--add $(DPKG)-devsudo)
+else
+DEVSUDO_ARGS :=
+endif
 
 # Stock partition dumps (docs/01 step 8) and what the build derives from them.
+ifeq ($(VARIANT),gts8pwifi)
 DUMPS       := device-facts/partitions-backup
-DUMP_PARTS  := boot apnhlos super
 HARVEST     := root-build/stock-extract/harvest
+ZAP_LEGACY  := root-build/stock-extract
+else
+DUMPS       := device-facts/$(DEVICE)/partitions-backup
+HARVEST     := root-build/$(VARIANT)/stock-extract/harvest
+ZAP_LEGACY  := root-build/$(VARIANT)/stock-extract
+endif
+DUMP_PARTS  := boot apnhlos super
 SENSORS     := root-build/stock-extract/sensors
 # Where tools/fw-manifest.tsv puts the a730_zap row (dest_dir column).
-ZAP_DIR     := $(HARVEST)/qcom/sm8450/gts8pwifi
+ZAP_DIR     := $(HARVEST)/qcom/sm8450/$(VARIANT)
 # Pre-harvest location of the same splits, still honoured by stage-fw.
-ZAP_LEGACY  := root-build/stock-extract
 
 # Package versions come from the overlay APKBUILDs, so every target that picks
 # an apk picks the one this tree describes, never the newest file by mtime.
@@ -67,11 +113,12 @@ KREL        := $(call pkgfield,$(OVERLAY)/$(KPKG),pkgrel)
 DVER        := $(call pkgfield,$(OVERLAY)/$(DPKG),pkgver)
 DREL        := $(call pkgfield,$(OVERLAY)/$(DPKG),pkgrel)
 KERNEL_APK  := $(PKGS)/$(KPKG)-$(KVER)-r$(KREL).apk
-DEVICE_APKS := $(PKGS)/$(DPKG)-$(DVER)-r$(DREL).apk \
-               $(PKGS)/$(DPKG)-systemd-$(DVER)-r$(DREL).apk
+DEVICE_APKS := $(PKGS)/$(DPKG)-$(DVER)-r$(DREL).apk
+ifeq ($(VARIANT),gts8pwifi)
+DEVICE_APKS += $(PKGS)/$(DPKG)-systemd-$(DVER)-r$(DREL).apk
+endif
 
 # Kernel command line handed to uniLoader as blob/cmdline (see cmdline-blob).
-CMDLINE_IN  := $(UL_PORT)/cmdline.in
 BOOTARGS_EXTRA ?=
 # FLAVOR suffixes the uniLoader binary, boot image and tar so boot-debug does
 # not overwrite the normal artifacts.
@@ -104,6 +151,9 @@ help: ## Show the build sequence and every target
 	@echo "    make install-tablet  later kernels: dd boot.img + apk add over ssh, reboot"
 	@echo ""
 	@echo "  VARIANTS:"
+	@echo "    VARIANT=gts8pwifi (default) for SM-X800 / Tab S8+"
+	@echo "    VARIANT=gts8wifi for SM-X700 / Tab S8 Wi-Fi"
+	@echo "    Set VARIANT on every command; build outputs are separated."
 	@echo "    make boot-debug      boot image with pmos.debug-shell (own boot-debug.img/.tar)"
 	@echo "    make kernel          kernel package only (kernel + our DTB)"
 	@echo "    make device          device + temp/ packages only"
@@ -153,14 +203,15 @@ check: ## Preflight: host tools, pmb init, uniLoader, dumps, harvest, apks (exit
 	for p in $(DUMP_PARTS); do \
 	    test -f $(DUMPS)/$$p.img && echo "   ok   $$p.img" || echo "   --   $$p.img (make dumps)"; done; \
 	test -f $(DUMPS)/boot.img || { echo "   MISS boot.img is needed for the stock ramdisk (make dumps)"; rc=1; }; \
-	echo ">> firmware harvest ($(HARVEST)):"; \
-	if test -f $(ZAP_DIR)/a730_zap.mdt; then echo "   ok   a730_zap in the harvest tree"; \
-	elif test -f $(ZAP_LEGACY)/a730_zap.mdt; then \
-	    echo "   note a730_zap only at the pre-harvest path $(ZAP_LEGACY)/ (make harvest)"; \
-	else \
-	    echo "   MISS a730_zap: make harvest (needs $(DUMPS)/apnhlos.img, see make dumps)"; rc=1; fi; \
-	test -d $(SENSORS) && echo "   ok   sensor registry configs in $(SENSORS)" \
-	    || echo "   --   sensor registry configs in $(SENSORS) (make harvest)"; \
+	if [ "$(VARIANT)" = "gts8pwifi" ]; then \
+	    echo ">> firmware harvest ($(HARVEST)):"; \
+	    if test -f $(ZAP_DIR)/a730_zap.mdt; then echo "   ok   a730_zap in the harvest tree"; \
+	    elif test -f $(ZAP_LEGACY)/a730_zap.mdt; then \
+	        echo "   note a730_zap only at the pre-harvest path $(ZAP_LEGACY)/ (make harvest)"; \
+	    else echo "   MISS a730_zap: make harvest (needs $(DUMPS)/apnhlos.img, see make dumps)"; rc=1; fi; \
+	    test -d $(SENSORS) && echo "   ok   sensor registry configs in $(SENSORS)" \
+	        || echo "   --   sensor registry configs in $(SENSORS) (make harvest)"; \
+	else echo ">> X700 signed firmware is staged on-device after first boot"; fi; \
 	echo ">> packages for $(KPKG) $(KVER)-r$(KREL), $(DPKG) $(DVER)-r$(DREL):"; \
 	test -f $(KERNEL_APK) && echo "   ok   $(KERNEL_APK)" \
 	    || echo "   --   $(KERNEL_APK) (make kernel)"; \
@@ -191,7 +242,7 @@ UL_COMMIT := 43770a04327532407194ddd3f9f35770daa01c70
 #   work path   <this repo>/pmb-work
 #   aports      <this repo>/pmb-work/cache_git/pmaports   (pmb clones it there)
 #   channel     edge
-#   device      samsung-gts8pwifi   (ours, from the overlay after sync-aports)
+#   device      $(DEVICE)   (selected variant, from the overlay after sync-aports)
 #   ui          console
 deps: ## One-time setup: clone uniLoader (pinned), apply our port, install chroot toolchain
 	@test -f $(PMB_CFG) && test -d $(APORTS_ROOT) || { \
@@ -205,11 +256,9 @@ deps: ## One-time setup: clone uniLoader (pinned), apply our port, install chroo
 	    git -C $(UL_SRC) remote add origin https://github.com/ivoszbg/uniLoader.git; \
 	    git -C $(UL_SRC) fetch -q --depth 1 origin $(UL_COMMIT); \
 	    git -C $(UL_SRC) checkout -q FETCH_HEAD; }
-	@# our board port lives in-repo; copy it into the upstream clone
-	install -Dm644 $(UL_PORT)/board/samsung/board-gts8pwifi.c \
-	    $(UL_SRC)/board/samsung/board-gts8pwifi.c
-	install -Dm644 $(UL_PORT)/configs/gts8pwifi_defconfig \
-	    $(UL_SRC)/configs/gts8pwifi_defconfig
+	@# the selected board port lives in-repo; stage it into the upstream clone
+	install -Dm644 $(UL_BOARD) $(UL_SRC)/board/samsung/board-$(BOARD).c
+	install -Dm644 $(UL_DEFCONFIG) $(UL_SRC)/configs/$(UL_CONFIG)
 	@# changes to upstream files travel as git-generated patches, applied in
 	@# name order (0001, 0002, ...); one that applies in reverse is already in.
 	@# git -C resolves a relative patch path inside the clone, hence CURDIR.
@@ -272,6 +321,7 @@ dumps: ## Verify stock dumps boot/apnhlos/super (.sha256 sidecars); ADB=1 pulls 
 # the harvest tree and the sensor registry configs out of super's vendor
 # image. Both scripts need root for lpunpack and loop mounts; the results are
 # handed back to the caller. Re-running rewrites the same files.
+ifeq ($(VARIANT),gts8pwifi)
 harvest: ## Harvest proprietary blobs (fw-harvest.sh) and sensor configs (sensors-from-super.sh) from the dumps
 	@test -f $(DUMPS)/apnhlos.img || test -f $(DUMPS)/super.img \
 	    || { echo "!! no apnhlos.img or super.img in $(DUMPS)/ (make dumps)"; exit 1; }
@@ -287,6 +337,11 @@ harvest: ## Harvest proprietary blobs (fw-harvest.sh) and sensor configs (sensor
 	elif test -f $(ZAP_LEGACY)/a730_zap.mdt; then \
 	    echo ">> WARNING: no a730_zap in the harvest tree; stage-fw keeps using $(ZAP_LEGACY)/ until apnhlos.img is dumped"; \
 	else echo ">> WARNING: no a730_zap anywhere; 'make image' stops at stage-fw (make dumps ADB=1, then make harvest)"; fi
+else
+harvest: ## X700: signed firmware is harvested on-device by gts8wifi-firmware-setup
+	@echo ">> X700 firmware is extracted from this tablet after first boot:"
+	@echo "   sudo gts8wifi-firmware-setup"
+endif
 
 ## ---------------------------------------------------------------------------
 ## Build
@@ -319,6 +374,7 @@ device: sync-aports ## Build the device package and the temp/ packages (hexagonr
 # here beats silently shipping a GPU-less boot image.
 # Transitional: trees harvested before `make harvest` existed keep the splits
 # directly in $(ZAP_LEGACY)/; those are used when the harvest tree has none.
+ifeq ($(VARIANT),gts8pwifi)
 stage-fw: ## Stage non-redistributable GPU firmware into the rootfs chroot initramfs
 	@set -e; \
 	if test -f $(ZAP_DIR)/a730_zap.mdt; then src=$(ZAP_DIR); \
@@ -332,6 +388,10 @@ stage-fw: ## Stage non-redistributable GPU firmware into the rootfs chroot initr
 	@zcat $(ROOTFS_BOOT)/initramfs | cpio -t 2>/dev/null | grep -q a730_zap.mdt \
 	    && echo ">> initramfs carries the zap" \
 	    || { echo "!! zap did NOT land in the initramfs"; exit 1; }
+else
+stage-fw: ## X700: extract signed firmware on-device after first boot
+	@echo ">> X700 firmware is staged by gts8wifi-firmware-setup on the tablet"
+endif
 
 # Read the rootfs UUIDs the way boot-deploy left them: the vendor_boot header
 # cmdline in the rootfs chroot (the same source `uuids` prints). Only the
@@ -351,12 +411,19 @@ endef
 
 # uniLoader embeds blob/cmdline and sets /chosen/bootargs from it when it is
 # non-empty (an empty blob leaves the DTS bootargs in place). Content:
-# $(CMDLINE_IN) with @BOOT_UUID@/@ROOT_UUID@ filled from the rootfs, plus
+# $(CMDLINE_IN), with UUID placeholders filled from the rootfs on X800, plus
 # `bootloader=uniloader`, plus BOOTARGS_EXTRA when set; NUL-terminated.
-cmdline-blob: ## Write reference/uniLoader/blob/cmdline from cmdline.in + rootfs UUIDs + BOOTARGS_EXTRA
+ifeq ($(VARIANT),gts8pwifi)
+CMDLINE_UUID_SETUP = $(read_rootfs_uuids)
+CMDLINE_UUID_SUBSTITUTIONS = -e "s/@BOOT_UUID@/$$BOOT_UUID/g" -e "s/@ROOT_UUID@/$$ROOT_UUID/g"
+else
+CMDLINE_UUID_SETUP = :
+CMDLINE_UUID_SUBSTITUTIONS =
+endif
+cmdline-blob: ## Write reference/uniLoader/blob/cmdline from the variant template + BOOTARGS_EXTRA
 	@set -e; test -f $(CMDLINE_IN) || { echo "!! $(CMDLINE_IN) missing"; exit 1; }; \
-	$(read_rootfs_uuids); \
-	CMD=$$(sed -e '/^[[:space:]]*#/d' -e "s/@BOOT_UUID@/$$BOOT_UUID/g" -e "s/@ROOT_UUID@/$$ROOT_UUID/g" \
+	$(CMDLINE_UUID_SETUP); \
+	CMD=$$(sed -e '/^[[:space:]]*#/d' $(CMDLINE_UUID_SUBSTITUTIONS) \
 	    $(CMDLINE_IN) | tr '\n' ' ' | sed -e 's/[[:space:]]\+/ /g' -e 's/^ //' -e 's/ $$//'); \
 	CMD="$$CMD bootloader=uniloader"; \
 	EXTRA='$(strip $(BOOTARGS_EXTRA))'; [ -z "$$EXTRA" ] || CMD="$$CMD $$EXTRA"; \
@@ -370,15 +437,15 @@ uniloader: toolchain stage-fw cmdline-blob ## Embed kernel+DTB+ramdisk(+cmdline)
 	echo ">> using $$APK"; \
 	mkdir -p $(STAGE); rm -rf $(STAGE)/boot $(STAGE)/uniLoader$(FLAVOR) $(STAGE)/kernel-apk; \
 	tar xzf "$$APK" --warning=no-unknown-keyword -C $(STAGE) boot/vmlinuz \
-	    boot/dtbs/qcom/sm8450-samsung-gts8pwifi.dtb; \
+	    boot/dtbs/qcom/$(DTB).dtb; \
 	gunzip -c $(STAGE)/boot/vmlinuz > $(UL_SRC)/blob/Image; \
-	cp $(STAGE)/boot/dtbs/qcom/sm8450-samsung-gts8pwifi.dtb $(UL_SRC)/blob/dtb; \
-	cp $(ROOTFS_BOOT)/initramfs $(UL_SRC)/blob/ramdisk; \
+	cp $(STAGE)/boot/dtbs/qcom/$(DTB).dtb $(UL_SRC)/blob/dtb; \
+	cp $(INITRAMFS) $(UL_SRC)/blob/ramdisk; \
 	rm -f $(UL_SRC)/uniLoader $(UL_SRC)/uniLoader.gz $(UL_SRC)/uniLoader.o $(UL_SRC)/.config; \
 	sudo rm -rf $(UL_CHROOT); sudo cp -r $(UL_SRC) $(UL_CHROOT); \
 	sudo chown -R 12345:12345 $(UL_CHROOT); \
 	$(PMB) chroot -- sh -c 'cd /home/pmos/uniLoader && \
-	    make ARCH=aarch64 CROSS_COMPILE=$(CROSS) gts8pwifi_defconfig >/dev/null && \
+	    make ARCH=aarch64 CROSS_COMPILE=$(CROSS) $(UL_CONFIG) >/dev/null && \
 	    make ARCH=aarch64 CROSS_COMPILE=$(CROSS) >/dev/null'; \
 	sudo cp $(UL_CHROOT)/uniLoader $(STAGE)/uniLoader$(FLAVOR); \
 	sudo chown $$(id -u):$$(id -g) $(STAGE)/uniLoader$(FLAVOR); \
@@ -398,12 +465,13 @@ bootimg: ## Package uniLoader into a flashable boot.img + tar
 	    --os_version $(OS_VERSION) --os_patch_level $(OS_PATCH) \
 	    --kernel $(STAGE)/uniLoader$(FLAVOR) --ramdisk $(STAGE)/stock_ramdisk --cmdline '' \
 	    -o $(BUILD)/boot$(FLAVOR).img; \
-	cd $(BUILD) && tar -H ustar -cf ../pmos_uniloader_boot$(FLAVOR).tar boot$(FLAVOR).img; \
-	ls -la ../pmos_uniloader_boot$(FLAVOR).tar
+	tar -H ustar -cf $(abspath $(BOOT_TAR)) -C $(BUILD) boot$(FLAVOR).img; \
+	ls -la $(BOOT_TAR)
 
 # The bring-up scoreboard, numbered like the docs/ phase files. Printed at the
 # end of every successful boot-image build: partly celebration, partly a
 # reminder of what any given flash is putting at risk.
+ifeq ($(VARIANT),gts8pwifi)
 manifest: ## Print the numbered subsystem bring-up manifest
 	@printf '\n   \033[1mSM-X800 mainline — systems online\033[0m\n'
 	@printf '   01 \033[32m✔\033[0m boot chain      ABL → uniLoader → mainline kernel\n'
@@ -414,16 +482,22 @@ manifest: ## Print the numbered subsystem bring-up manifest
 	@printf '   06 \033[32m✔\033[0m display         native KMS: DPU/DSI/DSC · S6TUUM1 panel · DPMS\n'
 	@printf '   07 \033[32m✔\033[0m gpu             Adreno 730 · zap from apnhlos · FD730 GL ES 3.2\n'
 	@printf '   08 \033[33m…\033[0m next            compositor · audio · S Pen · sensors\n\n'
+else
+manifest: ## Print the selected variant's validation status
+	@printf '\n   \033[1mSM-X700 variant — build target; not independently hardware-verified here\033[0m\n'
+	@printf '   Kernel source: SM8450 mainline 6.13-rc3; panel: Novatek NT36523\n'
+	@printf '   Device-tree board/revision selector must match your stock DTB (see docs/14).\n\n'
+endif
 
 boot: kernel uniloader bootimg manifest ## Full chain: kernel -> uniLoader -> flashable tar
-	@echo ">> root-build/pmos_uniloader_boot$(FLAVOR).tar ready. 'make flash' in download mode."
+	@echo ">> $(BOOT_TAR) ready. 'make flash' in download mode."
 
 # Same kernel apk as the last `make kernel`/`make image`, rebuilt uniLoader
 # with pmos.debug-shell on the cmdline, written beside the normal artifacts.
 boot-debug: ## Debug flavor: boot-debug.img + pmos_uniloader_boot-debug.tar with pmos.debug-shell
 	$(MAKE) --no-print-directory uniloader bootimg FLAVOR=-debug \
 	    BOOTARGS_EXTRA="pmos.debug-shell $(BOOTARGS_EXTRA)"
-	@echo ">> root-build/pmos_uniloader_boot-debug.tar ready (drops to the initramfs debug shell)"
+	@echo ">> $(ARTIFACT_DIR)/pmos_uniloader_boot-debug.tar ready (drops to the initramfs debug shell)"
 
 # The image stays MINIMAL (console) on purpose: Alpine's composition unit is
 # the metapackage, not the baked image. The assembled daily-driver is applied
@@ -441,7 +515,7 @@ rootfs: sync-aports ## Rebuild the minimal (console) rootfs, preserve image, pri
 	@echo ">> pmOS_boot AND pmOS_root) because uniLoader owns the real boot"
 	@echo ">> partition. See docs/05 section 8b."
 	$(PMB) install $(if $(PASSWORD),--password $(PASSWORD)) \
-		$(if $(DEVSUDO),--add $(DPKG)-devsudo)
+		$(DEVSUDO_ARGS)
 	@set -e; \
 	SRC=pmb-work/chroot_native/home/pmos/rootfs/$(DEVICE).img; \
 	echo ">> preserving $$SRC -> $(COMBINED)"; \
@@ -454,9 +528,10 @@ rootfs: sync-aports ## Rebuild the minimal (console) rootfs, preserve image, pri
 # DTS was last edited boots to the initramfs debug shell. Exit 1 on mismatch
 # and print the two DTS lines to change. Once the DTS carries no UUIDs (the
 # cmdline blob from cmdline-blob supplies them) this gate becomes unnecessary.
+ifeq ($(VARIANT),gts8pwifi)
 uuids: ## Gate: rootfs UUIDs (vendor_boot header) must match the DTS bootargs; exit 1 with the lines to change
 	@set -e; $(read_rootfs_uuids); \
-	DTS=$(OVERLAY)/$(KPKG)/sm8450-samsung-gts8pwifi.dts; \
+	DTS=$(OVERLAY)/$(KPKG)/$(DTB).dts; \
 	DB=$$(grep -o 'pmos_boot_uuid=[0-9a-f-]*' $$DTS | head -1 | cut -d= -f2); \
 	DR=$$(grep -o 'pmos_root_uuid=[0-9a-f-]*' $$DTS | head -1 | cut -d= -f2); \
 	echo ">> rootfs: pmos_boot_uuid=$$BOOT_UUID pmos_root_uuid=$$ROOT_UUID"; \
@@ -468,9 +543,13 @@ uuids: ## Gate: rootfs UUIDs (vendor_boot header) must match the DTS bootargs; e
 	    grep -n 'pmos_root_uuid=' $$DTS | cut -d: -f1 | head -1 | sed "s/^/   line /;s/$$/: pmos_root_uuid=$$DR -> pmos_root_uuid=$$ROOT_UUID/"; \
 	    echo "   sed -i 's/$$DB/$$BOOT_UUID/;s/$$DR/$$ROOT_UUID/' $$DTS"; \
 	    exit 1; fi
+else
+uuids: ## X700 UUIDs are supplied by the selected uniLoader command-line blob
+	@echo ">> X700 UUIDs are injected from the current rootfs by cmdline-blob"
+endif
 
 image: uuids kernel device boot sparse ## uuids gate -> kernel -> device -> boot -> sparse userdata tar
-	@echo ">> image complete: root-build/pmos_uniloader_boot.tar + root-build/pmos_userdata_sparse.tar"
+	@echo ">> image complete: $(ARTIFACT_DIR)/pmos_uniloader_boot.tar + $(USERDATA_TAR)"
 	@echo ">> first install: 'make flash-all' in download mode; kernel update on a running port: 'make install-tablet'"
 
 # Kernel update on the running port, no download mode: dd the boot image
@@ -536,10 +615,10 @@ flash-help: ## Which flash flavor do I want?
 	@echo "  after a re-entry; if it did not, the session is stale."
 
 flash: ## [boot only] DTS/kernel changes: the usual fast iteration loop
-	odin4 -a root-build/pmos_uniloader_boot.tar
+	odin4 -a $(BOOT_TAR)
 
 flash-full: ## [boot + stock vendor_boot + vbmeta] rarely needed
-	odin4 -a root-build/pmos_uniloader_ap.tar
+	odin4 -a $(AP_TAR)
 
 sparse: ## Build the sparse userdata tar (odin rejects raw ext4 at ~3%)
 	@set -e; \
@@ -548,22 +627,22 @@ sparse: ## Build the sparse userdata tar (odin rejects raw ext4 at ~3%)
 	mkdir -p $(BUILD)/sparse; \
 	echo ">> img2simg $$RAW (raw ext4 dies at ~3% with 'Fail request receive 3')"; \
 	img2simg $$RAW $(BUILD)/sparse/userdata.img; \
-	cd $(BUILD)/sparse && tar -H ustar -cf ../../pmos_userdata_sparse.tar userdata.img
+	tar -H ustar -cf $(abspath $(USERDATA_TAR)) -C $(BUILD)/sparse userdata.img
 
 flash-rootfs: sparse ## [userdata only] rootfs / device-package changes
-	odin4 -u root-build/pmos_userdata_sparse.tar
+	odin4 -u $(USERDATA_TAR)
 
 flash-all: sparse ## [boot + userdata] ONE odin session, no reboot between
 	@echo ">> single session: -a boot + -u userdata, no intermediate reboot"
-	odin4 -a root-build/pmos_uniloader_boot.tar \
-	      -u root-build/pmos_userdata_sparse.tar
+	odin4 -a $(BOOT_TAR) \
+	      -u $(USERDATA_TAR)
 
 flash-stay: sparse ## [boot + userdata] as flash-all, then RETURN to download mode
-	odin4 -a root-build/pmos_uniloader_boot.tar \
-	      -u root-build/pmos_userdata_sparse.tar --redownload
+	odin4 -a $(BOOT_TAR) \
+	      -u $(USERDATA_TAR) --redownload
 
 restore-android: ## [escape hatch] put stock Android back
-	odin4 -a root-build/android_restore.tar -u root-build/vbmeta_disabled.tar
+	odin4 -a $(RESTORE_DIR)/android_restore.tar -u $(RESTORE_DIR)/vbmeta_disabled.tar
 
 ## ---------------------------------------------------------------------------
 ## Maintenance
@@ -581,10 +660,8 @@ sync-overlay: ## Copy packages OUT of the live pmaports tree back into the repo
 	cp -r $(APORTS)/$(KPKG) $(OVERLAY)/
 	cp -r $(APORTS)/$(DPKG) $(OVERLAY)/
 	@for p in $(TEMP_PKGS); do cp -r $(APORTS_ROOT)/temp/$$p $(TEMP_OVERLAY)/; done
-	cp $(UL_SRC)/board/samsung/board-gts8pwifi.c \
-	   $(UL_PORT)/board/samsung/
-	cp $(UL_SRC)/configs/gts8pwifi_defconfig \
-	   $(UL_PORT)/configs/
+	cp $(UL_SRC)/board/samsung/board-$(BOARD).c $(UL_PORT)/board/samsung/
+	cp $(UL_SRC)/configs/$(UL_CONFIG) $(UL_PORT)/configs/
 
 lint: ## Validate packaging + DTS bracket balance (full DTS check = `make kernel`)
 	@echo "== APKBUILD shell syntax =="
@@ -596,17 +673,17 @@ lint: ## Validate packaging + DTS bracket balance (full DTS check = `make kernel
 	@# inside the kernel tree, so it CANNOT be compiled standalone. The real
 	@# syntax check is the kernel build (`make kernel`), which compiles the dtb.
 	@# Here we only catch the cheap structural mistakes.
-	@f=$(OVERLAY)/$(KPKG)/sm8450-samsung-gts8pwifi.dts; \
+	@f=$(OVERLAY)/$(KPKG)/$(DTB).dts; \
 	 ob=$$(tr -cd '{' < $$f | wc -c); cb=$$(tr -cd '}' < $$f | wc -c); \
 	 if [ "$$ob" = "$$cb" ]; then echo "  ok: braces balanced ($$ob)"; \
 	 else echo "  FAIL: brace mismatch ($$ob open vs $$cb close)"; exit 1; fi; \
-	 grep -q 'compatible = "samsung,gts8pwifi"' $$f \
+	 grep -q 'compatible = "$(COMPAT)"' $$f \
 	   && echo "  ok: compatible present" || { echo "  FAIL: compatible missing"; exit 1; }
 	@# A stray '*/' inside a comment silently ENDS that comment, and the rest
 	@# of the prose then parses as device tree. This has bitten us twice now,
 	@# both times from pasting a shell glob like /sys/.../<star>/file into a
 	@# comment. Catch it here instead of 3 minutes into a kernel build.
-	@f=$(OVERLAY)/$(KPKG)/sm8450-samsung-gts8pwifi.dts; \
+	@f=$(OVERLAY)/$(KPKG)/$(DTB).dts; \
 	 awk '/\/\*/{c=1} c&&/\*\//{n=gsub(/\*\//,"&"); if(n>1||/[^ \t].*\*\/.+/){ \
 	   if ($$0 !~ /^[ \t]*\*\/[ \t]*$$/ && $$0 !~ /\*\/[ \t]*$$/) \
 	     {print "  FAIL: stray */ mid-line at line " NR ": " $$0; bad=1}} c=0} \
@@ -618,11 +695,11 @@ lint: ## Validate packaging + DTS bracket balance (full DTS check = `make kernel
 dtb-dump: ## Decompile the DTB of the kernel apk the APKBUILD names (inspect what the kernel sees)
 	@test -f $(KERNEL_APK) || { echo "!! $(KERNEL_APK) missing: run 'make kernel'"; exit 1; }; \
 	rm -rf $(STAGE)/dump; mkdir -p $(STAGE)/dump; \
-	tar xzf "$(KERNEL_APK)" -C $(STAGE)/dump boot/dtbs/qcom/sm8450-samsung-gts8pwifi.dtb; \
-	dtc -I dtb -O dts $(STAGE)/dump/boot/dtbs/qcom/sm8450-samsung-gts8pwifi.dtb
+	tar xzf "$(KERNEL_APK)" -C $(STAGE)/dump boot/dtbs/qcom/$(DTB).dtb; \
+	dtc -I dtb -O dts $(STAGE)/dump/boot/dtbs/qcom/$(DTB).dtb
 
 clean: ## Remove staged build artifacts
 	rm -rf $(STAGE) $(BUILD)
 
 distclean: clean ## Also drop flashable tars
-	rm -f root-build/pmos_uniloader*.tar root-build/pmos_userdata_sparse.tar
+	rm -f $(ARTIFACT_DIR)/pmos_uniloader*.tar $(USERDATA_TAR)

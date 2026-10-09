@@ -15,6 +15,15 @@ keyboard, or ssh in over WLAN with no cables at all.
 
 No Galaxy Tab S8 port exists upstream — as far as we can tell this is the first.
 
+The repository also carries a separate **SM-X700 / `gts8wifi`** variant. It has
+its own device package, uniLoader board profile, device tree, and pinned 6.13
+kernel build; it does not reuse the X800 panel configuration. That variant is
+based on the community port at
+[kubierend/sm-x700-linux](https://github.com/kubierend/sm-x700-linux) and has
+not been tested on hardware by this project. Read
+[`docs/14-gts8wifi-variant.md`](docs/14-gts8wifi-variant.md) before building or
+flashing it.
+
 ![kmscube rendering on the Adreno 730, native KMS display, Book Cover Keyboard](docs/media/kmscube-adreno730.png)
 
 *kmscube on `FD730` (freedreno, OpenGL ES 3.2) — hardware GL through the native
