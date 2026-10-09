@@ -1,2 +1,2 @@
 # Console and devices required on the Galaxy Tab S8 (SM-X700).
-console=tty0 quiet loglevel=4 panic=10 plymouth.enable=0 arm-smmu.disable_bypass=0 usbcore.autosuspend=-1 pmos_boot_uuid=@BOOT_UUID@ pmos_root_uuid=@ROOT_UUID@ pmos_rootfsopts=defaults
+console=tty0 quiet loglevel=4 panic=10 plymouth.enable=0 arm-smmu.disable_bypass=0 usbcore.autosuspend=-1 pmos_rootfsopts=defaults
