@@ -411,12 +411,19 @@ endef
 
 # uniLoader embeds blob/cmdline and sets /chosen/bootargs from it when it is
 # non-empty (an empty blob leaves the DTS bootargs in place). Content:
-# $(CMDLINE_IN) with @BOOT_UUID@/@ROOT_UUID@ filled from the rootfs, plus
+# $(CMDLINE_IN), with UUID placeholders filled from the rootfs on X800, plus
 # `bootloader=uniloader`, plus BOOTARGS_EXTRA when set; NUL-terminated.
-cmdline-blob: ## Write reference/uniLoader/blob/cmdline from cmdline.in + rootfs UUIDs + BOOTARGS_EXTRA
+ifeq ($(VARIANT),gts8pwifi)
+CMDLINE_UUID_SETUP = $(read_rootfs_uuids)
+CMDLINE_UUID_SUBSTITUTIONS = -e "s/@BOOT_UUID@/$$BOOT_UUID/g" -e "s/@ROOT_UUID@/$$ROOT_UUID/g"
+else
+CMDLINE_UUID_SETUP = :
+CMDLINE_UUID_SUBSTITUTIONS =
+endif
+cmdline-blob: ## Write reference/uniLoader/blob/cmdline from the variant template + BOOTARGS_EXTRA
 	@set -e; test -f $(CMDLINE_IN) || { echo "!! $(CMDLINE_IN) missing"; exit 1; }; \
-	$(read_rootfs_uuids); \
-	CMD=$$(sed -e '/^[[:space:]]*#/d' -e "s/@BOOT_UUID@/$$BOOT_UUID/g" -e "s/@ROOT_UUID@/$$ROOT_UUID/g" \
+	$(CMDLINE_UUID_SETUP); \
+	CMD=$$(sed -e '/^[[:space:]]*#/d' $(CMDLINE_UUID_SUBSTITUTIONS) \
 	    $(CMDLINE_IN) | tr '\n' ' ' | sed -e 's/[[:space:]]\+/ /g' -e 's/^ //' -e 's/ $$//'); \
 	CMD="$$CMD bootloader=uniloader"; \
 	EXTRA='$(strip $(BOOTARGS_EXTRA))'; [ -z "$$EXTRA" ] || CMD="$$CMD $$EXTRA"; \
