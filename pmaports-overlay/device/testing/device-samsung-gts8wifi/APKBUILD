@@ -9,7 +9,7 @@ license="MIT"
 arch="aarch64"
 options="!check !archcheck"
 depends="
-	linux-postmarketos-qcom-sm8450
+	linux-postmarketos-qcom-sm8450-gts8wifi
 	postmarketos-base
 	mkbootimg
 	android-tools
