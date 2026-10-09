@@ -83,6 +83,11 @@ UL_CONFIG   := $(BOARD)_defconfig
 CROSS       := aarch64-alpine-linux-musl-
 # Stock boot.img values: Samsung enforces anti-rollback (download screen: AR:2)
 OS_VERSION  := 12.0.0
+ifeq ($(VARIANT),gts8pwifi)
+DEVSUDO_ARGS = $(if $(DEVSUDO),--add $(DPKG)-devsudo)
+else
+DEVSUDO_ARGS :=
+endif
 
 # Stock partition dumps (docs/01 step 8) and what the build derives from them.
 ifeq ($(VARIANT),gts8pwifi)
@@ -459,6 +464,7 @@ bootimg: ## Package uniLoader into a flashable boot.img + tar
 # The bring-up scoreboard, numbered like the docs/ phase files. Printed at the
 # end of every successful boot-image build: partly celebration, partly a
 # reminder of what any given flash is putting at risk.
+ifeq ($(VARIANT),gts8pwifi)
 manifest: ## Print the numbered subsystem bring-up manifest
 	@printf '\n   \033[1mSM-X800 mainline — systems online\033[0m\n'
 	@printf '   01 \033[32m✔\033[0m boot chain      ABL → uniLoader → mainline kernel\n'
@@ -469,6 +475,12 @@ manifest: ## Print the numbered subsystem bring-up manifest
 	@printf '   06 \033[32m✔\033[0m display         native KMS: DPU/DSI/DSC · S6TUUM1 panel · DPMS\n'
 	@printf '   07 \033[32m✔\033[0m gpu             Adreno 730 · zap from apnhlos · FD730 GL ES 3.2\n'
 	@printf '   08 \033[33m…\033[0m next            compositor · audio · S Pen · sensors\n\n'
+else
+manifest: ## Print the selected variant's validation status
+	@printf '\n   \033[1mSM-X700 variant — build target; not independently hardware-verified here\033[0m\n'
+	@printf '   Kernel source: SM8450 mainline 6.13-rc3; panel: Novatek NT36523\n'
+	@printf '   Device-tree board/revision selector must match your stock DTB (see docs/14).\n\n'
+endif
 
 boot: kernel uniloader bootimg manifest ## Full chain: kernel -> uniLoader -> flashable tar
 	@echo ">> $(BOOT_TAR) ready. 'make flash' in download mode."
@@ -496,7 +508,7 @@ rootfs: sync-aports ## Rebuild the minimal (console) rootfs, preserve image, pri
 	@echo ">> pmOS_boot AND pmOS_root) because uniLoader owns the real boot"
 	@echo ">> partition. See docs/05 section 8b."
 	$(PMB) install $(if $(PASSWORD),--password $(PASSWORD)) \
-		$(if $(DEVSUDO),--add $(DPKG)-devsudo)
+		$(DEVSUDO_ARGS)
 	@set -e; \
 	SRC=pmb-work/chroot_native/home/pmos/rootfs/$(DEVICE).img; \
 	echo ">> preserving $$SRC -> $(COMBINED)"; \

@@ -5,6 +5,8 @@ build target from the 12.4-inch Tab S8+ Wi-Fi (SM-X800, `gts8pwifi`). Select it
 on every Make invocation:
 
 ```sh
+./pmb init                        # use any available device for the initial setup
+make VARIANT=gts8wifi sync-aports
 make VARIANT=gts8wifi pmb-config
 make VARIANT=gts8wifi deps
 make VARIANT=gts8wifi kernel device
@@ -12,8 +14,10 @@ make VARIANT=gts8wifi rootfs
 make VARIANT=gts8wifi image
 ```
 
-Initialize pmbootstrap for `samsung-gts8wifi` before `pmb-config`, and use
-SM-X700 stock partition dumps under `device-facts/samsung-gts8wifi/partitions-backup`.
+Use the repository's `pmb-work` and `pmaports` paths during the initial
+pmbootstrap setup. `sync-aports` makes the variant package visible, then
+`pmb-config` selects `samsung-gts8wifi`. Keep SM-X700 stock partition dumps
+under `device-facts/samsung-gts8wifi/partitions-backup`.
 The regular `make` default remains the SM-X800. Kernel packages, rootfs images,
 boot artifacts, and build staging are kept separate between variants.
 
